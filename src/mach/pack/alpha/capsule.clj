@@ -90,6 +90,10 @@
    ["-d" "--deps STRING" "deps.edn file location"
     :default "deps.edn"
     :validate [(comp (memfn exists) io/file) "deps.edn file must exist"]]
+   ["-a" "--alias STRING" "Aliases to use for determining extra dependencies. E.g. -a :server:client/release"
+    :default ""
+    :assoc-fn (fn [m k v]
+                (assoc m k (map keyword (rest (string/split v #":")))))]
    ["-M" "--manifest-entry STRING"
     "a \"Key: Value\" pair that will be appended to the Capsule Manifest; useful for conveying arbitrary Manifest entries to the Capsule Manifest. Can be repeated to supply several entries."
     :validate [(fn [arg] (re-matches manifest-header-pattern arg))
@@ -121,6 +125,7 @@
 (defn -main
   [& args]
   (let [{{:keys [deps
+                 alias
                  extra-path
                  main
                  application-id
@@ -143,15 +148,18 @@
       :else
       (let [deps-map (tools.deps.reader/merge-deps
                        [(system-edn)
-                        (tools.deps.reader/slurp-deps (io/file deps))])]
+                        (tools.deps.reader/slurp-deps (io/file deps))])
+            resolve-args (tools.deps/combine-aliases
+                          deps-map
+                          (get-in parsed-opts [:options :alias]))]
         (classpath-string->jar
           (tools.deps/make-classpath
-            (tools.deps/resolve-deps deps-map nil)
-            (map
-              #(.resolveSibling (paths-get [deps])
-                                (paths-get [%]))
-              (:paths deps-map))
-            {:extra-paths extra-path})
+           (tools.deps/resolve-deps deps-map resolve-args)
+           (map
+            #(.resolveSibling (paths-get [deps])
+                              (paths-get [%]))
+            (:paths deps-map))
+           {:extra-paths extra-path})
           output
           (cond->
               [["Application-Class" "clojure.main"]
